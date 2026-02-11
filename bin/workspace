@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+VERSION="1.0.0"
+
 usage() {
     echo "Usage: $0 [--worktree] <command> [options]"
     echo ""
@@ -287,6 +289,12 @@ case $command in
         ;;
     help|--help|-h)
         usage
+        ;;
+    --version|-v)
+        echo "workspace version $VERSION"
+        echo ""
+        echo "workspace maintained by @sjdonado (github.com/sjdonado/tmux-workspace)."
+        exit 0
         ;;
     *)
         echo "Unknown command: $command"
