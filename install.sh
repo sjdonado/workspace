@@ -215,8 +215,7 @@ ensure_path() {
 }
 
 main() {
-  printf "\n"
-  info "Installing ${BINARY_NAME}...\n"
+  info "Installing ${BINARY_NAME}..."
 
   detect_os
   detect_shells
@@ -227,14 +226,7 @@ main() {
   configure_fish
   configure_zsh
 
-  printf "\n"
   success "Installation complete!"
-  printf "\n"
-  info "Usage:"
-  info "  workspace open          Open a tmux session (with fzf picker)"
-  info "  workspace close         Kill current tmux session"
-  info "  Ctrl-F                  Quick open (after restarting your shell)"
-  info "  man workspace           View full documentation"
   printf "\n"
   info "Restart your shell or run:"
 
@@ -244,8 +236,6 @@ main() {
   if [ -n "$ZSH_CONFIG" ]; then
     info "  source ${ZSH_CONFIG}"
   fi
-
-  printf "\n"
 }
 
 main
