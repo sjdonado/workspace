@@ -1,6 +1,6 @@
 # workspace
 
-A tmux session manager and git worktree tool. Quickly switch between projects with fzf, or manage parallel branch development with git worktrees -- all backed by tmux sessions with configurable pane layouts.
+A tmux session manager and Git worktree tool with fzf switching, automatic .env copying, and configurable setup commands for fast parallel worktrees.
 
 ## Install
 
