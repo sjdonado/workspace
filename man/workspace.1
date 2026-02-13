@@ -15,18 +15,18 @@ workspace \- manage tmux sessions and git worktrees
 .RI [ branch_name ]
 .br
 .B workspace
-.B \-\-worktree
+.B worktree
 .B create
-.I branch_name
 .RB [ \-\-setup ]
+.I branch_name
 .br
 .B workspace
-.B \-\-worktree
+.B worktree
 .B remove
 .RI [ branch_name ]
 .br
 .B workspace
-.B \-\-worktree
+.B worktree
 .B prune
 .RB [ \-\-force ]
 .br
@@ -45,15 +45,15 @@ for full git worktree management.
 .PP
 In sessionizer mode (default), the tool helps you quickly open existing directories in tmux sessions. It uses fzf to find git projects (both regular repositories and worktrees) in your current directory tree.
 .PP
-In worktree mode (with
-.BR \-\-worktree ),
-the tool provides full git worktree capabilities: creating new worktrees for branches, managing their lifecycle, and automatically setting up tmux sessions with custom layouts. When creating a worktree, the tool creates a git worktree in a sibling directory, sets up a tmux session with a configurable layout, copies environment and certificate files from the parent worktree, and optionally runs setup commands.
+In worktree mode (via the
+.B worktree
+subcommand), the tool provides full git worktree capabilities: creating new worktrees for branches, managing their lifecycle, and automatically setting up tmux sessions with custom layouts. When creating a worktree, the tool creates a git worktree in a sibling directory, sets up a tmux session with a configurable layout, copies environment and certificate files from the parent worktree, and optionally runs setup commands.
 .SH MODES
 .TP
 .B Sessionizer Mode (Default)
 Without the
-.B \-\-worktree
-flag, the tool operates as a tmux session manager. The
+.B worktree
+subcommand, the tool operates as a tmux session manager. The
 .B open
 command finds existing git projects using fzf and creates tmux sessions for them. This mode is ideal for:
 .RS
@@ -69,8 +69,8 @@ Simple tmux session management
 .TP
 .B Worktree Mode
 With the
-.B \-\-worktree
-flag, the tool provides full git worktree lifecycle management. Additional commands (create, remove, prune) become available for managing git worktrees. This mode is ideal for:
+.B worktree
+subcommand, the tool provides full git worktree lifecycle management. Additional commands (create, remove, prune) become available for managing git worktrees. This mode is ideal for:
 .RS
 .IP \(bu 2
 Feature branch development
@@ -104,8 +104,8 @@ Kill the tmux session and remove the git worktree for the specified branch. If
 is omitted, uses the current branch. Protected branches (main, master, _main, _master) cannot be removed. Any processes holding files in the worktree directory are automatically terminated.
 .IP
 This is a convenience shorthand for killing the session and removing the worktree in one step, without requiring the
-.B \-\-worktree
-flag.
+.B worktree
+subcommand.
 .TP
 .B help
 Display usage information and exit. Also accepts
@@ -116,9 +116,9 @@ and
 .B \-\-version
 Print the version number and exit. Also accepts
 .BR \-v .
-.SS Worktree Mode Commands (Require \-\-worktree)
+.SS Worktree Subcommands (workspace worktree <subcommand>)
 .TP
-.BI "create " branch_name " [--setup]"
+.BI "create " "[--setup] branch_name"
 Create a new git worktree for the specified branch and open a tmux session. The worktree is created as a sibling directory to the main repository. The tool automatically:
 .RS
 .IP \(bu 2
@@ -272,25 +272,25 @@ Kill session and remove worktree for a specific branch:
 .SS Worktree Mode
 .TP
 Create a worktree for a feature branch:
-.B workspace \-\-worktree create feature/user-auth
+.B workspace worktree create feature/user-auth
 .TP
 Create worktree and run setup commands:
-.B workspace \-\-worktree create feature/api-refactor \-\-setup
+.B workspace worktree create \-\-setup feature/api-refactor
 .TP
-Open an existing worktree (no \-\-worktree needed):
+Open an existing worktree:
 .B workspace open
 .TP
 Remove worktree for a specific branch:
-.B workspace \-\-worktree remove feature/old-feature
+.B workspace worktree remove feature/old-feature
 .TP
 Remove current branch's worktree:
-.B workspace \-\-worktree remove
+.B workspace worktree remove
 .TP
 Clean up all unused worktrees:
-.B workspace \-\-worktree prune
+.B workspace worktree prune
 .TP
 Force-clean all unused worktrees, including those with uncommitted changes:
-.B workspace \-\-worktree prune \-\-force
+.B workspace worktree prune \-\-force
 .SH WORKFLOW EXAMPLES
 .SS Quick Project Switching
 .nf
@@ -315,7 +315,7 @@ export WORKSPACE_INTERNAL_LAYOUT="2v,3h"
 export WORKSPACE_INTERNAL_SETUP_CMD="pnpm install"
 
 # Create a new worktree with auto-setup
-workspace \-\-worktree create feature/new-api \-\-setup
+workspace worktree create \-\-setup feature/new-api
 
 # Work on the feature...
 
@@ -329,7 +329,7 @@ workspace open
 workspace remove feature/new-api
 
 # Or clean up all unused worktrees at once
-workspace \-\-worktree prune
+workspace worktree prune
 .RE
 .fi
 .SH CONFIGURATION

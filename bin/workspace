@@ -3,23 +3,24 @@
 VERSION="1.0.0"
 
 usage() {
-    echo "Usage: $0 [--worktree] <command> [options]"
+    echo "Usage: $0 <command> [options]"
     echo ""
+    echo "Commands:"
     echo "  open [path]             Open existing directory (uses fzf to find git projects if no path given)"
     echo "  close [name]            Kill tmux session (auto-detects if omitted)"
     echo "  remove [branch_name]    Kill tmux session and remove git worktree (auto-detects if omitted)"
+    echo "  worktree <subcommand>   Git worktree operations (alias: --worktree)"
     echo "  help                    Show this help"
     echo ""
-    echo "Modes:"
-    echo "  --worktree             Enable worktree mode (git worktrees)"
-    echo "                          Without this flag, runs in sessionizer mode"
-    echo ""
-    echo "Worktree Mode Commands (requires --worktree):"
-    echo "  create <branch_name>    Create new git worktree and open tmux session"
-    echo "  remove [branch_name]    Remove git worktree (auto-detects if omitted)"
-    echo "  prune [--force]         Remove all unused worktrees"
+    echo "Worktree Subcommands:"
+    echo "  worktree create [--setup] <branch_name>"
+    echo "                          Create new git worktree and open tmux session"
+    echo "                          --setup: Run \$WORKSPACE_INTERNAL_SETUP_CMD after create"
+    echo "  worktree remove [branch_name]"
+    echo "                          Remove git worktree (auto-detects if omitted)"
+    echo "  worktree prune [--force]"
+    echo "                          Remove all unused worktrees"
     echo "                          --force: Also remove worktrees with uncommitted changes"
-    echo "  --setup                 Run \$WORKSPACE_INTERNAL_SETUP_CMD after create command"
     echo ""
     echo "Layout (WORKSPACE_INTERNAL_LAYOUT env var):"
     echo "  Format: <count><dir>[,<count><dir>,...] where dir is v/h/g"
@@ -168,21 +169,24 @@ if [[ $# -eq 0 ]]; then
     usage
 fi
 
-# Check for --worktree flag
-if [[ $1 == "--worktree" ]]; then
+command=$1
+shift
+
+# Handle worktree mode: "worktree" subcommand or "--worktree" flag (backward compat)
+if [[ $command == "worktree" || $command == "--worktree" ]]; then
     worktree_mode=true
-    shift
+
     if [[ $# -eq 0 ]]; then
         usage
     fi
+
+    command=$1
+    shift
 else
     sessionizer_mode=true
 fi
 
-command=$1
-shift
-
-# Parse options and arguments based on command and mode
+# Parse options and arguments based on command
 case $command in
     open)
         # Common command: open existing directory with tmux session
@@ -203,29 +207,35 @@ case $command in
     create)
         # Worktree mode only: create new git worktree
         if ! $worktree_mode; then
-            echo "Error: 'create' command only available in worktree mode (use --worktree)"
+            echo "Error: 'create' command only available in worktree mode (use 'worktree create')"
             usage
         fi
         add_worktree=true
-        if [[ $# -eq 0 ]]; then
-            echo "Error: branch name required for 'create' command"
-            usage
-        fi
-        branch_name=$1
-        shift
-        # Check for --setup flag
+        # Parse flags and branch name
         while [[ $# -gt 0 ]]; do
             case $1 in
                 --setup)
                     run_setup=true
                     ;;
-                *)
+                --*)
                     echo "Unknown option for 'create': $1"
                     usage
+                    ;;
+                *)
+                    if [[ -z $branch_name ]]; then
+                        branch_name=$1
+                    else
+                        echo "Unknown option for 'create': $1"
+                        usage
+                    fi
                     ;;
             esac
             shift
         done
+        if [[ -z $branch_name ]]; then
+            echo "Error: branch name required for 'create' command"
+            usage
+        fi
         ;;
     remove)
         if $worktree_mode; then
@@ -255,7 +265,7 @@ case $command in
         ;;
     prune)
         if ! $worktree_mode; then
-            echo "Error: 'prune' command only available in worktree mode (use --worktree)"
+            echo "Error: 'prune' command only available in worktree mode (use 'worktree prune')"
             usage
         fi
         prune_worktrees=true

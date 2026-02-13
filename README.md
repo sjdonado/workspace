@@ -60,20 +60,20 @@ workspace remove feature/old-feature
 Create a worktree for a feature branch:
 
 ```sh
-workspace --worktree create feature/user-auth
+workspace worktree create feature/user-auth
 ```
 
 Create with automatic setup (runs `$WORKSPACE_INTERNAL_SETUP_CMD`):
 
 ```sh
-workspace --worktree create feature/api-refactor --setup
+workspace worktree create --setup feature/api-refactor
 ```
 
 Clean up all unused worktrees:
 
 ```sh
-workspace --worktree prune
-workspace --worktree prune --force  # also removes worktrees with uncommitted changes
+workspace worktree prune
+workspace worktree prune --force  # also removes worktrees with uncommitted changes
 ```
 
 ### Ctrl-F keybinding
@@ -110,13 +110,14 @@ export worktree_NODE_ENV="development"
 ## Commands
 
 ```
-workspace open [path]                  Open directory in tmux session (fzf picker if no path)
-workspace close [session_name]         Kill tmux session
-workspace remove [branch_name]         Kill tmux session and remove git worktree
-workspace --worktree create <branch>   Create git worktree + tmux session
-workspace --worktree prune [--force]   Remove all unused worktrees
-workspace help                         Show usage
-workspace --version                    Show version
+workspace open [path]                        Open directory in tmux session (fzf picker if no path)
+workspace close [session_name]               Kill tmux session
+workspace remove [branch_name]               Kill tmux session and remove git worktree
+workspace worktree create [--setup] <branch> Create git worktree + tmux session
+workspace worktree remove [branch_name]      Remove git worktree
+workspace worktree prune [--force]           Remove all unused worktrees
+workspace help                               Show usage
+workspace --version                          Show version
 ```
 
 ## Documentation
