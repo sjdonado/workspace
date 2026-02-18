@@ -131,7 +131,7 @@ install_manpage() {
         fi
       fi
       if [ -n "$ZSH_CONFIG" ]; then
-        if ! grep -qF 'MANPATH.*\.local/share/man' "$ZSH_CONFIG" 2>/dev/null; then
+        if ! grep -qF '.local/share/man' "$ZSH_CONFIG" 2>/dev/null; then
           printf '\nexport MANPATH="$HOME/.local/share/man:$MANPATH"\n' >> "$ZSH_CONFIG"
         fi
       fi

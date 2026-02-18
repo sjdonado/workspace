@@ -21,12 +21,6 @@ usage() {
     echo "  worktree prune [--force]"
     echo "                          Remove all unused worktrees"
     echo "                          --force: Also remove worktrees with uncommitted changes"
-    echo ""
-    echo "Layout (WORKSPACE_INTERNAL_LAYOUT env var):"
-    echo "  Format: <count><dir>[,<count><dir>,...] where dir is v/h/g"
-    echo "  v = vertical splits (side by side), h = horizontal splits (stacked)"
-    echo "  g = grid layout (equal squares, e.g., 4g = 2x2 grid)"
-    echo "  Example: 4g = single window with 4 equal panes"
     exit 0
 }
 
