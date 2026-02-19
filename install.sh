@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="sjdonado/tmux-workspace"
+REPO="sjdonado/workspace"
 BINARY_NAME="workspace"
 INSTALL_DIR="/usr/local/bin"
 

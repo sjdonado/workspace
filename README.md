@@ -1,11 +1,11 @@
 # workspace
 
-A tmux session manager and Git worktree tool with fzf switching, automatic .env copying, and configurable setup commands for fast parallel worktrees.
+A terminal session manager and Git worktree tool with fzf switching, automatic .env copying, and configurable setup commands for fast parallel worktrees. Supports tmux and Ghostty with automatic detection.
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sjdonado/tmux-workspace/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/sjdonado/workspace/main/install.sh | sh
 ```
 
 This will:
@@ -17,13 +17,13 @@ To update, run the same command again.
 
 ### Requirements
 
-- [tmux](https://github.com/tmux/tmux)
 - [git](https://git-scm.com)
+- [tmux](https://github.com/tmux/tmux) or [Ghostty](https://ghostty.org) (at least one)
 - [fzf](https://github.com/junegunn/fzf) (optional, for interactive project selection)
 
 ## Usage
 
-### Sessionizer mode (default)
+### Open mode (default)
 
 Open a project by picking from git repos in the current directory (up to 3 levels deep):
 
@@ -31,19 +31,21 @@ Open a project by picking from git repos in the current directory (up to 3 level
 workspace open
 ```
 
+When run inside a git worktree, lists existing worktree branches and remote branches via fzf, switching to or creating the selected worktree.
+
 Or open a specific directory:
 
 ```sh
 workspace open ~/projects/myapp
 ```
 
-Close the current tmux session:
+Close the current session:
 
 ```sh
 workspace close
 ```
 
-Kill the tmux session and remove the worktree for the current branch:
+Close the session and remove the worktree for the current branch:
 
 ```sh
 workspace remove
@@ -57,7 +59,7 @@ workspace remove feature/old-feature
 
 ### Worktree mode
 
-Create a worktree for a feature branch:
+Create a worktree for a feature branch (opens in a new tmux session or Ghostty tab):
 
 ```sh
 workspace worktree create feature/user-auth
@@ -85,19 +87,19 @@ After installation, press **Ctrl-F** in your terminal to run `workspace open` --
 Set these environment variables in your shell configuration:
 
 ```sh
-# Tmux layout for new sessions
+# Tmux layout for new sessions (tmux mode only)
 # Format: <count><direction>,... where direction is v (vertical), h (horizontal), g (grid)
 export WORKSPACE_INTERNAL_LAYOUT="2v,4g"
 
 # Command to run after creating a worktree with --setup
 export WORKSPACE_INTERNAL_SETUP_CMD="bun install && bun build"
 
-# Variables forwarded to tmux sessions (worktree_ prefix is stripped)
+# Variables forwarded to tmux sessions (worktree_ prefix is stripped, tmux mode only)
 export worktree_API_URL="http://localhost:3000"
 export worktree_NODE_ENV="development"
 ```
 
-### Layout examples
+### Layout examples (tmux mode)
 
 | Layout | Description |
 |--------|-------------|
@@ -107,13 +109,22 @@ export worktree_NODE_ENV="development"
 | `4g` | 2x2 grid |
 | `2v,3h` | Two windows: first with 2 vertical panes, second with 3 horizontal |
 
+## Terminal modes
+
+Workspace auto-detects the terminal backend:
+
+| Mode | Detection | Features |
+|------|-----------|----------|
+| **tmux** | Inside a tmux session (`$TMUX` set) | Sessions, layouts, panes, env forwarding |
+| **Ghostty** | Ghostty terminal (`$TERM_PROGRAM`) | Opens new tabs via `open -a Ghostty` (macOS) or `ghostty` CLI (Linux) |
+
 ## Commands
 
 ```
-workspace open [path]                        Open directory in tmux session (fzf picker if no path)
-workspace close [session_name]               Kill tmux session
-workspace remove [branch_name]               Kill tmux session and remove git worktree
-workspace worktree create [--setup] <branch> Create git worktree + tmux session
+workspace open [path]                        Open directory in new session/tab (fzf picker if no path)
+workspace close [session_name]               Close session/tab
+workspace remove [branch_name]               Close session and remove git worktree
+workspace worktree create [--setup] <branch> Create git worktree + session/tab
 workspace worktree remove [branch_name]      Remove git worktree
 workspace worktree prune [--force]           Remove all unused worktrees
 workspace help                               Show usage
