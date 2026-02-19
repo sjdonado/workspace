@@ -1,6 +1,6 @@
 # workspace
 
-A terminal session manager and Git worktree tool with fzf switching, automatic .env copying, and configurable setup commands for fast parallel worktrees. Supports tmux, Ghostty, and Alacritty with automatic detection.
+A terminal session manager and Git worktree tool with fzf switching, automatic .env copying, and configurable setup commands for fast parallel worktrees. Supports tmux, Kitty, Ghostty, and Alacritty with automatic detection.
 
 ## Install
 
@@ -18,7 +18,7 @@ To update, run the same command again.
 ### Requirements
 
 - [git](https://git-scm.com)
-- [tmux](https://github.com/tmux/tmux), [Ghostty](https://ghostty.org), or [Alacritty](https://alacritty.org) (at least one)
+- [tmux](https://github.com/tmux/tmux), [Kitty](https://sw.kovidgoyal.net/kitty/), [Ghostty](https://ghostty.org), or [Alacritty](https://alacritty.org) (at least one)
 - [fzf](https://github.com/junegunn/fzf) (optional, for interactive project selection)
 
 ## Usage
@@ -59,7 +59,7 @@ workspace remove feature/old-feature
 
 ### Worktree mode
 
-Create a worktree for a feature branch (opens in a new tmux session, Ghostty tab, or Alacritty window):
+Create a worktree for a feature branch (opens in a new tmux session, Kitty tab, Ghostty tab, or Alacritty window):
 
 ```sh
 workspace worktree create feature/user-auth
@@ -100,7 +100,7 @@ export WORKSPACE_INTERNAL_LAYOUT="2v,4g"
 # Command to run after creating a worktree with --setup
 export WORKSPACE_INTERNAL_SETUP_CMD="bun install && bun build"
 
-# Variables forwarded to tmux sessions (worktree_ prefix is stripped, tmux mode only)
+# Variables forwarded to tmux/Kitty sessions (worktree_ prefix is stripped)
 export worktree_API_URL="http://localhost:3000"
 export worktree_NODE_ENV="development"
 ```
@@ -122,6 +122,7 @@ Workspace auto-detects the terminal backend:
 | Mode | Detection | Features |
 |------|-----------|----------|
 | **tmux** | Inside a tmux session (`$TMUX` set) | Sessions, layouts, panes, env forwarding |
+| **Kitty** | Kitty terminal (`$KITTY_WINDOW_ID`) | Tabs via `kitten @` remote control, env forwarding, send-text, tab queries/close (requires `allow_remote_control`) |
 | **Ghostty** | Ghostty terminal (`$TERM_PROGRAM`) | Opens new tabs via `open -a Ghostty` (macOS) or `ghostty` CLI (Linux) |
 | **Alacritty** | Alacritty terminal (`$TERM_PROGRAM` or `$ALACRITTY_SOCKET`) | Opens new windows via `alacritty msg create-window` (IPC) or `alacritty` CLI (fallback) |
 

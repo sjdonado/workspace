@@ -41,9 +41,11 @@ workspace \- manage terminal sessions and git worktrees
 .B \-\-version
 .SH DESCRIPTION
 .B workspace
-is a unified tool for managing terminal sessions and git worktrees. It auto-detects the terminal environment and operates in one of four modes:
+is a unified tool for managing terminal sessions and git worktrees. It auto-detects the terminal environment and operates in one of five modes:
 .B tmux mode
 (inside a tmux session),
+.B kitty mode
+(running in Kitty terminal with remote control),
 .B ghostty mode
 (running in Ghostty terminal without tmux),
 .B alacritty mode
@@ -70,10 +72,35 @@ Active when the
 .B TMUX
 environment variable is set (running inside a tmux session). Provides full functionality including pane layouts, environment variable forwarding, and send-keys support.
 .TP
+.B kitty mode
+Active when the
+.B KITTY_WINDOW_ID
+environment variable is present and not inside tmux. Uses Kitty tabs via
+.B kitten @
+remote control commands. Requires
+.B allow_remote_control
+to be enabled in Kitty's configuration (set to
+.BR yes " or " socket-only ).
+This mode provides near-full functionality:
+.RS
+.IP \(bu 2
+Tab creation via \fBkitten @ launch \-\-type=tab\fR with working directory and tab title
+.IP \(bu 2
+Environment variable forwarding (worktree_* variables set via \-\-env flags at launch)
+.IP \(bu 2
+Programmatic tab queries (prune can detect active tabs via \fBkitten @ ls\fR)
+.IP \(bu 2
+Send-keys support (\-\-setup sends commands via \fBkitten @ send\-text\fR)
+.IP \(bu 2
+Tabs can be closed programmatically via \fBkitten @ close\-tab\fR
+.RE
+.IP
+No pane layout support (WORKSPACE_INTERNAL_LAYOUT is ignored; only single-pane tabs are created).
+.TP
 .B ghostty mode
 Active when
 .B TERM_PROGRAM
-is set to "ghostty" and not inside tmux. Uses Ghostty tabs instead of tmux sessions. On macOS, new tabs are opened via
+is set to "ghostty" and not inside tmux or Kitty. Uses Ghostty tabs instead of tmux sessions. On macOS, new tabs are opened via
 .BR "open -a Ghostty" ;
 on Linux, via the
 .B ghostty
@@ -117,7 +144,7 @@ Windows cannot be closed programmatically (user must close manually)
 .B unsupported
 When no supported terminal is detected, terminal-dependent commands (open, close) will fail with an error. Git-only commands (worktree remove, worktree prune) still work.
 .PP
-If tmux is running inside Ghostty or Alacritty, tmux mode takes priority.
+If tmux is running inside Kitty, Ghostty, or Alacritty, tmux mode takes priority. Kitty takes priority over Ghostty and Alacritty.
 .SH MODES
 .TP
 .B Sessionizer Mode (Default)
@@ -155,7 +182,7 @@ Managing worktree lifecycle (creation, pruning)
 .SS Common Commands (Both Modes)
 .TP
 .BI "open " [path]
-Open an existing directory in a terminal session (tmux session, Ghostty tab, or Alacritty window). If no path is provided, the behavior depends on context:
+Open an existing directory in a terminal session (tmux session, Kitty tab, Ghostty tab, or Alacritty window). If no path is provided, the behavior depends on context:
 .RS
 .IP \(bu 2
 .B Inside a git worktree:
@@ -166,12 +193,12 @@ Uses fzf to list all existing worktree branches and remote branches. On selectio
 Uses fzf to interactively select from git projects (repositories and worktrees) found up to 3 levels deep from the current directory.
 .RE
 .IP
-In tmux mode, if a session for the directory already exists, attaches to it (or switches to it if already inside tmux). Otherwise, creates a new session with the configured layout. In Ghostty mode, always opens a new tab (existing tabs cannot be queried). In Alacritty mode, always opens a new window (existing windows cannot be queried).
+In tmux mode, if a session for the directory already exists, attaches to it (or switches to it if already inside tmux). Otherwise, creates a new session with the configured layout. In Kitty mode, if a tab with the same title exists, focuses it; otherwise, creates a new tab. In Ghostty mode, always opens a new tab (existing tabs cannot be queried). In Alacritty mode, always opens a new window (existing windows cannot be queried).
 .IP
 Session names are derived from the directory path. If the target is within the current directory, the relative path is used; otherwise, the basename is used. Dots and slashes are replaced with underscores for tmux compatibility.
 .TP
 .BI "close " [session_name]
-Close the specified session. In tmux mode, kills the tmux session. In Ghostty mode, prints a message to close the tab manually. In Alacritty mode, prints a message to close the window manually. If
+Close the specified session. In tmux mode, kills the tmux session. In Kitty mode, closes the matching tab via remote control. In Ghostty mode, prints a message to close the tab manually. In Alacritty mode, prints a message to close the window manually. If
 .I session_name
 is omitted, auto-detects from the current environment. An error is returned if no terminal backend is detected.
 .TP
@@ -196,18 +223,18 @@ Print the version number and exit. Also accepts
 .SS Worktree Subcommands (workspace worktree <subcommand>)
 .TP
 .BI "create " "[--setup] branch_name"
-Create a new git worktree for the specified branch and open a terminal session (tmux session, Ghostty tab, or Alacritty window). The worktree is created as a sibling directory to the main repository. The tool automatically:
+Create a new git worktree for the specified branch and open a terminal session (tmux session, Kitty tab, Ghostty tab, or Alacritty window). The worktree is created as a sibling directory to the main repository. The tool automatically:
 .RS
 .IP \(bu 2
 Fetches latest changes from remote
 .IP \(bu 2
 Creates a worktree from a remote branch if it exists on origin, or creates a new local branch
 .IP \(bu 2
-Sets up a terminal session with the configured layout (tmux only; Ghostty/Alacritty open a tab/window)
+Sets up a terminal session with the configured layout (tmux only; Kitty/Ghostty/Alacritty open a tab/window)
 .IP \(bu 2
 Copies .env and .pem files from the parent repository
 .IP \(bu 2
-Propagates worktree_* environment variables to the session (tmux only)
+Propagates worktree_* environment variables to the session (tmux and Kitty only)
 .RE
 .IP
 If the worktree already exists, it is reused. The tool performs a smart pull with safety checks:
@@ -222,20 +249,20 @@ Fast-forwards if possible
 Warns if the branch has diverged from remote
 .RE
 .IP
-Any existing session for the branch is closed and recreated with the current layout configuration (tmux), a new tab is opened (Ghostty), or a new window is opened (Alacritty).
+Any existing session for the branch is closed and recreated with the current layout configuration (tmux), a new tab is opened (Kitty/Ghostty), or a new window is opened (Alacritty).
 .IP
 Use the
 .B \-\-setup
 flag to run the command specified in
 .B WORKSPACE_INTERNAL_SETUP_CMD
-after creating the worktree. In tmux mode, the command is sent to the first pane. In Ghostty and Alacritty modes, the user is prompted to run
+after creating the worktree. In tmux and Kitty modes, the command is sent to the first pane/window. In Ghostty and Alacritty modes, the user is prompted to run
 .B workspace worktree setup
 manually in the new tab/window.
 .TP
 .B setup
 Run the command specified in
 .B WORKSPACE_INTERNAL_SETUP_CMD
-in the current worktree. This is useful for manually running setup after opening a worktree, especially in Ghostty and Alacritty modes where send-keys is not available.
+in the current worktree. This is useful for manually running setup after opening a worktree, especially in Ghostty and Alacritty modes where send-keys/send-text is not available.
 .TP
 .BI "remove " [branch_name]
 Remove the git worktree for the specified branch. If
@@ -243,14 +270,14 @@ Remove the git worktree for the specified branch. If
 is omitted, uses the current branch. Protected branches (main, master, _main, _master) cannot be removed. Any processes holding files in the worktree directory are automatically terminated.
 .TP
 .BI "prune " [--force]
-Remove all worktrees that have no active session. In Ghostty and Alacritty modes, active tabs/windows cannot be detected, so the tool relies on the clean-working-tree check as a safety net. By default, worktrees with uncommitted changes are skipped. This command preserves:
+Remove all worktrees that have no active session. In Ghostty and Alacritty modes, active tabs/windows cannot be detected, so the tool relies on the clean-working-tree check as a safety net. In Kitty mode, active tabs are detected via remote control. By default, worktrees with uncommitted changes are skipped. This command preserves:
 .RS
 .IP \(bu 2
 The main worktree
 .IP \(bu 2
 Protected branches (main, master, _main, _master)
 .IP \(bu 2
-Worktrees with active sessions (tmux only)
+Worktrees with active sessions (tmux and Kitty only)
 .IP \(bu 2
 Worktrees with uncommitted changes (unless
 .B \-\-force
@@ -308,7 +335,9 @@ Command to run when
 .B \-\-setup
 is specified during worktree creation, or when
 .B workspace worktree setup
-is invoked directly. In tmux mode with \-\-setup, the command is sent as keystrokes to the first pane. In Ghostty and Alacritty modes, the user is prompted to run
+is invoked directly. In tmux mode with \-\-setup, the command is sent as keystrokes to the first pane. In Kitty mode, the command is sent via
+.B kitten @ send\-text
+to the new tab. In Ghostty and Alacritty modes, the user is prompted to run
 .B workspace worktree setup
 manually. Typically used for installing dependencies or running build commands.
 .IP
@@ -320,14 +349,23 @@ Any environment variable prefixed with
 .B worktree_
 (except those starting with
 .BR worktree_INTERNAL )
-will be set in the session environment with the prefix removed (tmux only). For example,
+will be set in the session environment with the prefix removed (tmux and Kitty). For example,
 .B worktree_API_KEY
 becomes
 .B API_KEY
-in the tmux session. In Ghostty and Alacritty modes, these variables are not forwarded.
+in the tmux session or Kitty tab. In Ghostty and Alacritty modes, these variables are not forwarded.
 .TP
 .B TMUX
 Set automatically by tmux. When present, the tool operates in tmux mode.
+.TP
+.B KITTY_WINDOW_ID
+Set automatically by Kitty in all child processes. When present and TMUX is not set, the tool operates in Kitty mode. Kitty's remote control must be enabled (set
+.B allow_remote_control
+to
+.B yes
+or
+.B socket-only
+in kitty.conf) for full functionality.
 .TP
 .B TERM_PROGRAM
 Used to detect Ghostty and Alacritty terminals. When set to "ghostty" and TMUX is not set, the tool operates in Ghostty mode. When set to "alacritty" and TMUX is not set, the tool operates in Alacritty mode.
@@ -445,7 +483,7 @@ export WORKSPACE_INTERNAL_LAYOUT="2v,4g"
 # Setup command for new worktrees
 export WORKSPACE_INTERNAL_SETUP_CMD="pnpm install && pnpm build"
 
-# Variables forwarded to tmux sessions (prefix removed)
+# Variables forwarded to tmux/Kitty sessions (prefix removed)
 export worktree_API_URL="http://localhost:3000"
 export worktree_NODE_ENV="development"
 .RE
@@ -470,6 +508,10 @@ file pointing to parent repository).
 .B Terminal (one required):
 .BR tmux (1)
 (full functionality),
+.UR https://sw.kovidgoyal.net/kitty/
+Kitty
+.UE
+terminal (near-full functionality, requires remote control; see TERMINAL DETECTION),
 Ghostty terminal (reduced functionality, see TERMINAL DETECTION), or
 .UR https://alacritty.org
 Alacritty
@@ -491,6 +533,8 @@ Error (missing branch name, protected branch removal, worktree not found, invali
 .SH SEE ALSO
 .BR git-worktree (1),
 .BR tmux (1),
+.BR kitty (1),
+.BR kitten (1),
 .BR alacritty (1),
 .BR alacritty-msg (1),
 .BR fzf (1),

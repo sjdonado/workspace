@@ -8,11 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Kitty terminal support with near-full functionality via `kitten @` remote control (requires `allow_remote_control` in kitty.conf)
+- Kitty tab creation via `kitten @ launch --type=tab` with working directory, tab title, and environment variables
+- Kitty tab queries via `kitten @ ls`, tab close via `kitten @ close-tab`, send-text via `kitten @ send-text`
+- Kitty environment variable forwarding: `worktree_*` variables are set via `--env` flags at tab launch time
+- Kitty limitation: no pane layout support (WORKSPACE_INTERNAL_LAYOUT is ignored; only single-pane tabs are created)
 - Alacritty terminal support: auto-detected via `$TERM_PROGRAM` or `$ALACRITTY_SOCKET` environment variables
 - New window creation via `alacritty msg create-window` (IPC, same process) when socket is available, falling back to launching a new `alacritty` process
 - Alacritty mode has the same limitations as Ghostty mode: no pane layouts, no environment variable forwarding, no send-keys, no programmatic window queries or close
 
-## [1.1.0] - 2025-02-19
+## [1.1.0] - 2026-02-18
 
 ### Added
 
@@ -27,7 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `open`, `close`, `remove`, `worktree create`, and `worktree prune` commands now adapt to the detected terminal mode
 - tmux is no longer a hard requirement when using Ghostty
 
-## [1.0.0] - 2025-02-11
+## [1.0.0] - 2026-02-11
 
 ### Added
 
