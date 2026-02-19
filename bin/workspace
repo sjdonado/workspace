@@ -2,7 +2,18 @@
 
 VERSION="1.0.0"
 
-usage() {
+# Terminal mode detection (tmux > ghostty > none)
+if [[ -n "$TMUX" ]]; then
+    WORKSPACE_MODE="tmux"
+elif [[ "$TERM_PROGRAM" == "ghostty" ]]; then
+    WORKSPACE_MODE="ghostty"
+else
+    WORKSPACE_MODE="none"
+fi
+
+# --- Command handlers ---
+
+cmd_usage() {
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
@@ -26,165 +37,247 @@ usage() {
     exit 0
 }
 
-# Terminal mode detection (tmux > ghostty > none)
-if [[ -n "$TMUX" ]]; then
-    WORKSPACE_MODE="tmux"
-elif [[ "$TERM_PROGRAM" == "ghostty" ]]; then
-    WORKSPACE_MODE="ghostty"
-else
-    WORKSPACE_MODE="none"
-fi
+cmd_open() {
+    local target_path="$1"
+    require_terminal_backend
 
-worktree_mode=false
-add_worktree=false
-run_setup=false
-remove_worktree=false
-remove_single=false
-close_session=false
-prune_worktrees=false
-force_prune=false
-sessionizer_mode=false
-target_path=""
-branch_name=""
+    # Try to get relative path from current directory
+    local current_dir selected_name
+    current_dir="$(pwd)"
+    if [[ "$target_path" == "$current_dir/"* ]]; then
+        selected_name="${target_path#$current_dir/}"
+    else
+        selected_name=$(basename "$target_path")
+    fi
 
-create_tmux_layout() {
+    # Replace slashes and dots with underscores for session name
+    selected_name=$(echo "$selected_name" | tr './' '__')
+
+    if ! backend_session_exists "$selected_name"; then
+        backend_create_session "$selected_name" "$target_path"
+    fi
+
+    backend_attach_session "$selected_name"
+}
+
+cmd_close() {
     local session_name="$1"
-    local work_dir="$2"
-    local layout="${WORKSPACE_INTERNAL_LAYOUT:-1v}"
+    backend_kill_session "$session_name"
+}
 
-    # Create initial session with first window
-    tmux new-session -d -s "${session_name}" -c "${work_dir}"
+cmd_remove_single() {
+    local branch_name="$1"
+    local base_path
+    base_path=$(git rev-parse --show-toplevel)
+    local protected=(_main _master main master)
 
-    # Parse layout: format is "2v,3h,1v,4g" where number=panes, letter=direction (v/h/g for grid)
-    IFS=',' read -ra windows <<< "$layout"
-    local first_window=true
+    for p in "${protected[@]}"; do
+        [[ "${branch_name}" == "${p}" ]] && {
+            echo "Refusing to remove protected branch: ${p}"
+            exit 1
+        }
+    done
 
-    for window_spec in "${windows[@]}"; do
-        # Extract count and direction (e.g., "2v" -> count=2, dir=v)
-        if [[ "$window_spec" =~ ^([0-9]+)([vhg])$ ]]; then
-            local pane_count="${BASH_REMATCH[1]}"
-            local direction="${BASH_REMATCH[2]}"
+    backend_kill_session "$branch_name"
 
-            if $first_window; then
-                # Use the already created window
-                first_window=false
-                local target="${session_name}:0"
-            else
-                # Create new window
-                tmux new-window -t "${session_name}" -c "${work_dir}"
-                local target="${session_name}"
+    # Remove git worktree
+    local workdir="$base_path/../${branch_name}"
+    [[ ! -d "$workdir" ]] && { echo "Cannot resolve worktree for ${branch_name}"; exit 1; }
+    local abs
+    abs=$(command -v realpath &>/dev/null && realpath "$workdir" || cd "$workdir" && pwd -P)
+
+    local reg
+    reg=$(git worktree list --porcelain | awk '$1=="worktree"{print $2}')
+    if echo "$reg" | grep -Fxq "$abs"; then
+        echo "Removing worktree: $abs"
+        git worktree remove --force "$abs" || { echo "Failed removing worktree $abs"; exit 1; }
+    else
+        echo "No registered worktree at $abs"; exit 1
+    fi
+
+    kill_stray_processes "$abs"
+}
+
+cmd_prune() {
+    local force_prune="$1"
+    local base_path
+    base_path=$(git rev-parse --show-toplevel)
+    local protected=(_main _master main master)
+
+    echo "Scanning worktrees for pruning..."
+
+    # Get list of all worktrees (excluding main worktree)
+    git worktree list --porcelain | awk '
+        /^worktree / { path=$2 }
+        /^branch / {
+            branch=$2
+            sub(/^refs\/heads\//, "", branch)
+            if (path && branch) print path "|" branch
+            path=""; branch=""
+        }
+    ' | while IFS='|' read -r worktree_path branch_name; do
+        # Skip if this is the main worktree
+        [[ "$worktree_path" == "$base_path" ]] && continue
+
+        # Skip protected branches
+        local is_protected=false
+        for p in "${protected[@]}"; do
+            if [[ "$branch_name" == "$p" ]]; then
+                is_protected=true
+                break
             fi
+        done
+        [[ "$is_protected" == "true" ]] && continue
 
-            if [[ "$direction" == "g" ]]; then
-                # Grid layout: create panes and use tiled layout for equal distribution
-                local splits_needed=$((pane_count - 1))
-                for ((i=0; i<splits_needed; i++)); do
-                    # Alternate between horizontal and vertical splits for better grid
-                    if (( i % 2 == 0 )); then
-                        tmux split-window -t "$target" -h -c "${work_dir}"
-                    else
-                        tmux split-window -t "$target" -v -c "${work_dir}"
-                    fi
-                done
-                # Apply tiled layout for equal squares
-                tmux select-layout -t "$target" "tiled"
+        # Check if session exists (tmux only — Ghostty tabs cannot be queried)
+        if backend_session_exists "$branch_name"; then
+            echo "⏭  Skipping $branch_name (session active)"
+            continue
+        fi
+
+        # Check if working tree is clean (skip this check if --force is used)
+        if [[ "$force_prune" != "true" ]] && [[ -n $(cd "$worktree_path" && git status --porcelain) ]]; then
+            echo "⏭  Skipping $branch_name (uncommitted changes)"
+            continue
+        fi
+
+        # Safe to remove
+        if [[ "$force_prune" == "true" ]] && [[ -n $(cd "$worktree_path" && git status --porcelain) ]]; then
+            echo "🗑  Removing $branch_name (forced, uncommitted changes present)"
+        else
+            echo "🗑  Removing $branch_name (no session, clean working tree)"
+        fi
+        git worktree remove --force "$worktree_path" 2>/dev/null || {
+            echo "   Failed to remove $worktree_path, trying to clean up..."
+            kill_stray_processes "$worktree_path"
+            git worktree remove --force "$worktree_path" 2>/dev/null || echo "   Could not remove $worktree_path"
+        }
+    done
+
+    echo "Prune complete."
+}
+
+cmd_worktree_remove() {
+    local branch_name="$1"
+    local base_path
+    base_path=$(git rev-parse --show-toplevel)
+    local protected=(_main _master main master)
+
+    for p in "${protected[@]}"; do
+        [[ "${branch_name}" == "${p}" ]] && {
+            echo "Refusing to remove protected branch: ${p}"
+            exit 1
+        }
+    done
+
+    local workdir="$base_path/../${branch_name}"
+    [[ ! -d "$workdir" ]] && { echo "Cannot resolve worktree for ${branch_name}"; exit 1; }
+    local abs
+    abs=$(command -v realpath &>/dev/null && realpath "$workdir" || cd "$workdir" && pwd -P)
+
+    local reg
+    reg=$(git worktree list --porcelain | awk '$1=="worktree"{print $2}')
+    if echo "$reg" | grep -Fxq "$abs"; then
+        echo "Removing worktree: $abs"
+        git worktree remove --force "$abs" || { echo "Failed removing worktree $abs"; exit 1; }
+    else
+        echo "No registered worktree at $abs"; exit 1
+    fi
+
+    kill_stray_processes "$abs"
+}
+
+cmd_worktree_create() {
+    local branch_name="$1"
+    local run_setup="$2"
+    local base_path worktree_path
+    base_path=$(git rev-parse --show-toplevel)
+    worktree_path="$base_path/../${branch_name}"
+
+    # Always fetch latest changes from remote
+    echo "Fetching latest changes from remote..."
+    git fetch
+
+    # Create worktree if missing
+    if [[ -d "${worktree_path}" ]]; then
+        echo "Reusing existing worktree at: ${worktree_path}"
+        [[ ! -e "${worktree_path}/.git" ]] && { echo "Error: ${worktree_path} is not a git worktree"; exit 1; }
+
+        # Smart pull with safety checks for existing worktree
+        (
+            cd "${worktree_path}"
+
+            # Check if branch has a remote tracking branch
+            if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} &>/dev/null; then
+                echo "Local-only branch (no remote tracking). Skipping pull."
             else
-                # Create splits to reach desired pane count
-                local splits_needed=$((pane_count - 1))
-                for ((i=0; i<splits_needed; i++)); do
-                    if [[ "$direction" == "v" ]]; then
-                        tmux split-window -t "$target" -h -c "${work_dir}"
-                    else
-                        tmux split-window -t "$target" -v -c "${work_dir}"
-                    fi
-                done
-                # Apply appropriate layout after all splits
-                if [[ "$direction" == "v" ]]; then
-                    tmux select-layout -t "$target" "even-horizontal"
+                # Check if working tree is clean
+                if [[ -n $(git status --porcelain) ]]; then
+                    echo "⚠️  Working tree has uncommitted changes. Skipping auto-pull."
+                    echo "Run 'git status' in the worktree to see changes."
                 else
-                    tmux select-layout -t "$target" "even-vertical"
+                    # Check if we can fast-forward
+                    local LOCAL REMOTE BASE
+                    LOCAL=$(git rev-parse @)
+                    REMOTE=$(git rev-parse @{u})
+                    BASE=$(git merge-base @ @{u})
+
+                    if [[ "$LOCAL" == "$REMOTE" ]]; then
+                        echo "Already up to date with remote."
+                    elif [[ "$LOCAL" == "$BASE" ]]; then
+                        echo "Fast-forwarding to latest changes..."
+                        git pull --ff-only
+                    else
+                        echo "⚠️  Branch has diverged from remote (local commits or needs rebase)."
+                        echo "Run 'git pull' manually in the worktree to merge/rebase changes."
+                        git --no-pager log --oneline --decorate --left-right --graph @...@{u} 2>/dev/null | head -10 || true
+                    fi
                 fi
             fi
-        fi
-    done
-
-    # Select first window and first pane
-    tmux select-window -t "${session_name}:0"
-    tmux select-pane -t "${session_name}:0.0"
-}
-
-copy_env_files() {
-    local source_dir="$1"
-    local target_dir="$2"
-
-    echo "Copying .env files from $source_dir to $target_dir"
-
-    # Find all .env files in source directory and subdirectories
-    find "$source_dir" -name ".env" -type f | while IFS= read -r env_file; do
-        # Get relative path from source directory
-        rel_path="${env_file#$source_dir/}"
-        target_file="$target_dir/$rel_path"
-        target_parent=$(dirname "$target_file")
-
-        # Create target directory if it doesn't exist
-        if [[ ! -d "$target_parent" ]]; then
-            mkdir -p "$target_parent"
-        fi
-
-        # Copy .env file if target doesn't exist
-        if [[ -f "$target_file" ]]; then
-            echo "Preserving existing: $rel_path"
+        )
+    else
+        # Check if branch exists on remote
+        if git show-ref --verify --quiet "refs/remotes/origin/${branch_name}"; then
+            echo "Creating worktree from remote branch: origin/${branch_name}"
+            git worktree add --checkout -b "${branch_name}" "${worktree_path}" "origin/${branch_name}"
         else
-            echo "Copying environment file: $rel_path"
-            cp "$env_file" "$target_file"
+            echo "Creating worktree with new local branch: ${branch_name}"
+            git worktree add --checkout -B "${branch_name}" "${worktree_path}"
         fi
+    fi
+
+    # Session cleanup and creation
+    require_terminal_backend
+    backend_kill_session "${branch_name}"
+    backend_create_session "${branch_name}" "${worktree_path}"
+
+    # Set worktree environment variables
+    local var_name env_key env_value
+    for var_name in $(printenv | grep -oE '^worktree_[^=]+' | grep -v '^worktree_INTERNAL'); do
+        env_key="${var_name#worktree_}"
+        env_value="${!var_name}"
+        backend_set_environment "${branch_name}" "${env_key}" "${env_value}"
     done
-}
 
-copy_pem_files() {
-    local source_dir="$1"
-    local target_dir="$2"
+    # Copy all .env files from parent worktree to new worktree
+    copy_env_files "$base_path" "$worktree_path"
 
-    echo "Copying .pem files from $source_dir to $target_dir"
+    # Copy all .pem files from parent worktree to new worktree
+    copy_pem_files "$base_path" "$worktree_path"
 
-    # Find all .pem files in source directory and subdirectories
-    find "$source_dir" -name "*.pem" -type f | while IFS= read -r pem_file; do
-        # Get relative path from source directory
-        rel_path="${pem_file#$source_dir/}"
-        target_file="$target_dir/$rel_path"
-        target_parent=$(dirname "$target_file")
-
-        # Create target directory if it doesn't exist
-        if [[ ! -d "$target_parent" ]]; then
-            mkdir -p "$target_parent"
+    # Post-setup commands
+    if [[ "$run_setup" == "true" ]]; then
+        if [[ -z "${WORKSPACE_INTERNAL_SETUP_CMD}" ]]; then
+            echo "Error: WORKSPACE_INTERNAL_SETUP_CMD is not set"
+            exit 1
         fi
+        backend_send_keys "${branch_name}" "${WORKSPACE_INTERNAL_SETUP_CMD}"
+    fi
 
-        # Copy .pem file if target doesn't exist
-        if [[ -f "$target_file" ]]; then
-            echo "Preserving existing: $rel_path"
-        else
-            echo "Copying certificate file: $rel_path"
-            cp "$pem_file" "$target_file"
-        fi
-    done
+    backend_attach_session "${branch_name}"
 }
 
-ghostty_open_tab() {
-    local dir="$1"
-    case "$(uname -s)" in
-        Darwin)
-            open -a Ghostty "$dir"
-            ;;
-        Linux)
-            ghostty --working-directory="$dir" &
-            disown
-            ;;
-        *)
-            echo "Error: Ghostty tab creation not supported on this OS"
-            return 1
-            ;;
-    esac
-}
+# --- Backend abstraction ---
 
 require_terminal_backend() {
     if [[ "$WORKSPACE_MODE" == "none" ]]; then
@@ -264,38 +357,171 @@ backend_send_keys() {
     esac
 }
 
-# Parse command (first argument)
+# --- Implementation helpers ---
+
+create_tmux_layout() {
+    local session_name="$1"
+    local work_dir="$2"
+    local layout="${WORKSPACE_INTERNAL_LAYOUT:-1v}"
+
+    # Create initial session with first window
+    tmux new-session -d -s "${session_name}" -c "${work_dir}"
+
+    # Parse layout: format is "2v,3h,1v,4g" where number=panes, letter=direction (v/h/g for grid)
+    IFS=',' read -ra windows <<< "$layout"
+    local first_window=true
+
+    for window_spec in "${windows[@]}"; do
+        # Extract count and direction (e.g., "2v" -> count=2, dir=v)
+        if [[ "$window_spec" =~ ^([0-9]+)([vhg])$ ]]; then
+            local pane_count="${BASH_REMATCH[1]}"
+            local direction="${BASH_REMATCH[2]}"
+
+            if $first_window; then
+                # Use the already created window
+                first_window=false
+                local target="${session_name}:0"
+            else
+                # Create new window
+                tmux new-window -t "${session_name}" -c "${work_dir}"
+                local target="${session_name}"
+            fi
+
+            if [[ "$direction" == "g" ]]; then
+                # Grid layout: create panes and use tiled layout for equal distribution
+                local splits_needed=$((pane_count - 1))
+                for ((i=0; i<splits_needed; i++)); do
+                    # Alternate between horizontal and vertical splits for better grid
+                    if (( i % 2 == 0 )); then
+                        tmux split-window -t "$target" -h -c "${work_dir}"
+                    else
+                        tmux split-window -t "$target" -v -c "${work_dir}"
+                    fi
+                done
+                # Apply tiled layout for equal squares
+                tmux select-layout -t "$target" "tiled"
+            else
+                # Create splits to reach desired pane count
+                local splits_needed=$((pane_count - 1))
+                for ((i=0; i<splits_needed; i++)); do
+                    if [[ "$direction" == "v" ]]; then
+                        tmux split-window -t "$target" -h -c "${work_dir}"
+                    else
+                        tmux split-window -t "$target" -v -c "${work_dir}"
+                    fi
+                done
+                # Apply appropriate layout after all splits
+                if [[ "$direction" == "v" ]]; then
+                    tmux select-layout -t "$target" "even-horizontal"
+                else
+                    tmux select-layout -t "$target" "even-vertical"
+                fi
+            fi
+        fi
+    done
+
+    # Select first window and first pane
+    tmux select-window -t "${session_name}:0"
+    tmux select-pane -t "${session_name}:0.0"
+}
+
+ghostty_open_tab() {
+    local dir="$1"
+    case "$(uname -s)" in
+        Darwin)
+            open -a Ghostty "$dir"
+            ;;
+        Linux)
+            ghostty --working-directory="$dir" &
+            disown
+            ;;
+        *)
+            echo "Error: Ghostty tab creation not supported on this OS"
+            return 1
+            ;;
+    esac
+}
+
+copy_env_files() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    echo "Copying .env files from $source_dir to $target_dir"
+
+    find "$source_dir" -name ".env" -type f | while IFS= read -r env_file; do
+        local rel_path="${env_file#$source_dir/}"
+        local target_file="$target_dir/$rel_path"
+        local target_parent
+        target_parent=$(dirname "$target_file")
+
+        [[ ! -d "$target_parent" ]] && mkdir -p "$target_parent"
+
+        if [[ -f "$target_file" ]]; then
+            echo "Preserving existing: $rel_path"
+        else
+            echo "Copying environment file: $rel_path"
+            cp "$env_file" "$target_file"
+        fi
+    done
+}
+
+copy_pem_files() {
+    local source_dir="$1"
+    local target_dir="$2"
+
+    echo "Copying .pem files from $source_dir to $target_dir"
+
+    find "$source_dir" -name "*.pem" -type f | while IFS= read -r pem_file; do
+        local rel_path="${pem_file#$source_dir/}"
+        local target_file="$target_dir/$rel_path"
+        local target_parent
+        target_parent=$(dirname "$target_file")
+
+        [[ ! -d "$target_parent" ]] && mkdir -p "$target_parent"
+
+        if [[ -f "$target_file" ]]; then
+            echo "Preserving existing: $rel_path"
+        else
+            echo "Copying certificate file: $rel_path"
+            cp "$pem_file" "$target_file"
+        fi
+    done
+}
+
+kill_stray_processes() {
+    local dir="$1"
+    local pids
+    if command -v lsof &>/dev/null; then
+        pids=$(lsof +D "$dir" -t 2>/dev/null)
+    else
+        pids=$(ps -eo pid,cmd | awk -v p="$dir" '$0~p{print $1}')
+    fi
+    [[ -n "$pids" ]] && echo "$pids" | xargs -r kill 2>/dev/null
+}
+
+# --- Parse and dispatch ---
+
 if [[ $# -eq 0 ]]; then
-    usage
+    cmd_usage
 fi
 
 command=$1
 shift
 
-# Handle worktree mode: "worktree" subcommand or "--worktree" flag (backward compat)
+# Handle worktree mode
+worktree_mode=false
 if [[ $command == "worktree" || $command == "--worktree" ]]; then
     worktree_mode=true
-
-    if [[ $# -eq 0 ]]; then
-        usage
-    fi
-
+    [[ $# -eq 0 ]] && cmd_usage
     command=$1
     shift
-else
-    sessionizer_mode=true
 fi
 
-# Parse options and arguments based on command
 case $command in
     open)
-        # Common command: open existing directory with tmux session
         if [[ $# -eq 0 ]]; then
-            # Use fzf to find git projects (repos + worktrees) up to 3 levels deep
             target_path=$(find "$(pwd)" -maxdepth 3 -name ".git" \( -type d -o -type f \) -exec dirname {} \; 2>/dev/null | sort -u | fzf)
-            if [[ -z $target_path ]]; then
-                exit 0
-            fi
+            [[ -z $target_path ]] && exit 0
         else
             target_path=$(realpath "$1" 2>/dev/null)
             if [[ ! -d $target_path ]]; then
@@ -303,30 +529,24 @@ case $command in
                 exit 1
             fi
         fi
+        cmd_open "$target_path"
         ;;
     create)
-        # Worktree mode only: create new git worktree
         if ! $worktree_mode; then
             echo "Error: 'create' command only available in worktree mode (use 'worktree create')"
-            usage
+            cmd_usage
         fi
-        add_worktree=true
-        # Parse flags and branch name
+        run_setup=false
+        branch_name=""
         while [[ $# -gt 0 ]]; do
             case $1 in
-                --setup)
-                    run_setup=true
-                    ;;
-                --*)
-                    echo "Unknown option for 'create': $1"
-                    usage
-                    ;;
+                --setup) run_setup=true ;;
+                --*) echo "Unknown option for 'create': $1"; cmd_usage ;;
                 *)
                     if [[ -z $branch_name ]]; then
                         branch_name=$1
                     else
-                        echo "Unknown option for 'create': $1"
-                        usage
+                        echo "Unknown option for 'create': $1"; cmd_usage
                     fi
                     ;;
             esac
@@ -334,23 +554,24 @@ case $command in
         done
         if [[ -z $branch_name ]]; then
             echo "Error: branch name required for 'create' command"
-            usage
+            cmd_usage
         fi
+        cmd_worktree_create "$branch_name" "$run_setup"
         ;;
     remove)
-        if $worktree_mode; then
-            remove_worktree=true
-        else
-            remove_single=true
-        fi
+        branch_name=""
         if [[ $# -gt 0 && $1 != --* ]]; then
             branch_name=$1
         else
             branch_name=$(git branch --show-current)
         fi
+        if $worktree_mode; then
+            cmd_worktree_remove "$branch_name"
+        else
+            cmd_remove_single "$branch_name"
+        fi
         ;;
     close)
-        close_session=true
         if [[ $# -gt 0 && $1 != --* ]]; then
             target_path=$1
         else
@@ -360,29 +581,25 @@ case $command in
             fi
             target_path=$(backend_current_session_name)
         fi
+        cmd_close "$target_path"
         ;;
     prune)
         if ! $worktree_mode; then
             echo "Error: 'prune' command only available in worktree mode (use 'worktree prune')"
-            usage
+            cmd_usage
         fi
-        prune_worktrees=true
-        # Check for --force flag
+        force_prune=false
         while [[ $# -gt 0 ]]; do
             case $1 in
-                --force)
-                    force_prune=true
-                    ;;
-                *)
-                    echo "Unknown option for 'prune': $1"
-                    usage
-                    ;;
+                --force) force_prune=true ;;
+                *) echo "Unknown option for 'prune': $1"; cmd_usage ;;
             esac
             shift
         done
+        cmd_prune "$force_prune"
         ;;
     help|--help|-h)
-        usage
+        cmd_usage
         ;;
     --version|-v)
         echo "workspace version $VERSION"
@@ -392,255 +609,6 @@ case $command in
         ;;
     *)
         echo "Unknown command: $command"
-        usage
+        cmd_usage
         ;;
 esac
-
-# Open command: create/attach session for directory
-if [[ -n $target_path ]]; then
-    require_terminal_backend
-
-    # Try to get relative path from current directory
-    current_dir="$(pwd)"
-    if [[ "$target_path" == "$current_dir/"* ]]; then
-        selected_name="${target_path#$current_dir/}"
-    else
-        selected_name=$(basename "$target_path")
-    fi
-
-    # Replace slashes and dots with underscores for session name
-    selected_name=$(echo "$selected_name" | tr './' '__')
-
-    if ! backend_session_exists "$selected_name"; then
-        backend_create_session "$selected_name" "$target_path"
-    fi
-
-    backend_attach_session "$selected_name"
-    exit 0
-fi
-
-# Handle close for both modes
-if $close_session; then
-    session_name="${target_path:-$branch_name}"
-    backend_kill_session "$session_name"
-    exit 0
-fi
-
-if $remove_single; then
-    base_path=$(git rev-parse --show-toplevel)
-    protected=(_main _master main master)
-
-    for p in "${protected[@]}"; do
-        [[ "${branch_name}" == "${p}" ]] && {
-            echo "Refusing to remove protected branch: ${p}"
-            exit 1
-        }
-    done
-
-    backend_kill_session "$branch_name"
-
-    # Remove git worktree
-    workdir="$base_path/../${branch_name}"
-    [[ ! -d "$workdir" ]] && { echo "Cannot resolve worktree for ${branch_name}"; exit 1; }
-    abs=$(command -v realpath &>/dev/null && realpath "$workdir" || cd "$workdir" && pwd -P)
-
-    reg=$(git worktree list --porcelain | awk '$1=="worktree"{print $2}')
-    if echo "$reg" | grep -Fxq "$abs"; then
-        echo "Removing worktree: $abs"
-        git worktree remove --force "$abs" || { echo "Failed removing worktree $abs"; exit 1; }
-    else
-        echo "No registered worktree at $abs"; exit 1
-    fi
-
-    # Kill stray processes
-    if command -v lsof &>/dev/null; then
-        pids=$(lsof +D "$abs" -t 2>/dev/null)
-    else
-        pids=$(ps -eo pid,cmd | awk -v p="$abs" '$0~p{print $1}')
-    fi
-    [[ -n "$pids" ]] && echo "$pids" | xargs -r kill 2>/dev/null
-
-    exit 0
-fi
-
-if $prune_worktrees; then
-    base_path=$(git rev-parse --show-toplevel)
-    protected=(_main _master main master)
-
-    echo "Scanning worktrees for pruning..."
-
-    # Get list of all worktrees (excluding main worktree)
-    git worktree list --porcelain | awk '
-        /^worktree / { path=$2 }
-        /^branch / {
-            branch=$2
-            sub(/^refs\/heads\//, "", branch)
-            if (path && branch) print path "|" branch
-            path=""; branch=""
-        }
-    ' | while IFS='|' read -r worktree_path branch_name; do
-        # Skip if this is the main worktree
-        [[ "$worktree_path" == "$base_path" ]] && continue
-
-        # Skip protected branches
-        is_protected=false
-        for p in "${protected[@]}"; do
-            if [[ "$branch_name" == "$p" ]]; then
-                is_protected=true
-                break
-            fi
-        done
-        [[ "$is_protected" == "true" ]] && continue
-
-        # Check if session exists (tmux only — Ghostty tabs cannot be queried)
-        if backend_session_exists "$branch_name"; then
-            echo "⏭  Skipping $branch_name (session active)"
-            continue
-        fi
-
-        # Check if working tree is clean (skip this check if --force is used)
-        if ! $force_prune && [[ -n $(cd "$worktree_path" && git status --porcelain) ]]; then
-            echo "⏭  Skipping $branch_name (uncommitted changes)"
-            continue
-        fi
-
-        # Safe to remove
-        if $force_prune && [[ -n $(cd "$worktree_path" && git status --porcelain) ]]; then
-            echo "🗑  Removing $branch_name (forced, uncommitted changes present)"
-        else
-            echo "🗑  Removing $branch_name (no session, clean working tree)"
-        fi
-        git worktree remove --force "$worktree_path" 2>/dev/null || {
-            echo "   Failed to remove $worktree_path, trying to clean up..."
-            # Kill stray processes
-            if command -v lsof &>/dev/null; then
-                pids=$(lsof +D "$worktree_path" -t 2>/dev/null)
-            else
-                pids=$(ps -eo pid,cmd | awk -v p="$worktree_path" '$0~p{print $1}')
-            fi
-            [[ -n "$pids" ]] && echo "$pids" | xargs -r kill 2>/dev/null
-            git worktree remove --force "$worktree_path" 2>/dev/null || echo "   Could not remove $worktree_path"
-        }
-    done
-
-    echo "Prune complete."
-    exit 0
-fi
-
-# Worktree mode: remaining commands require git context
-base_path=$(git rev-parse --show-toplevel)
-worktree_path="$base_path/../${branch_name}"
-
-if $remove_worktree; then
-    protected=(_main _master main master)
-    for p in "${protected[@]}"; do
-        [[ "${branch_name}" == "${p}" ]] && {
-            echo "Refusing to remove protected branch: ${p}"
-            exit 1
-        }
-    done
-
-    workdir="$base_path/../${branch_name}"
-    [[ ! -d "$workdir" ]] && { echo "Cannot resolve worktree for ${branch_name}"; exit 1; }
-    abs=$(command -v realpath &>/dev/null && realpath "$workdir" || cd "$workdir" && pwd -P)
-
-    reg=$(git worktree list --porcelain | awk '$1=="worktree"{print $2}')
-    if echo "$reg" | grep -Fxq "$abs"; then
-        echo "Removing worktree: $abs"
-        git worktree remove --force "$abs" || { echo "Failed removing worktree $abs"; exit 1; }
-    else
-        echo "No registered worktree at $abs"; exit 1
-    fi
-
-    # kill stray processes
-    if command -v lsof &>/dev/null; then
-        pids=$(lsof +D "$abs" -t 2>/dev/null)
-    else
-        pids=$(ps -eo pid,cmd | awk -v p="$abs" '$0~p{print $1}')
-    fi
-    [[ -n "$pids" ]] && echo "$pids" | xargs -r kill
-
-    exit 0
-fi
-
-if $add_worktree; then
-    # Always fetch latest changes from remote
-    echo "Fetching latest changes from remote..."
-    git fetch
-
-    # Create worktree if missing
-    if [[ -d "${worktree_path}" ]]; then
-        echo "Reusing existing worktree at: ${worktree_path}"
-        [[ ! -e "${worktree_path}/.git" ]] && { echo "Error: ${worktree_path} is not a git worktree"; exit 1; }
-
-        # Smart pull with safety checks for existing worktree
-        (
-            cd "${worktree_path}"
-
-            # Check if branch has a remote tracking branch
-            if ! git rev-parse --abbrev-ref --symbolic-full-name @{u} &>/dev/null; then
-                echo "Local-only branch (no remote tracking). Skipping pull."
-            else
-                # Check if working tree is clean
-                if [[ -n $(git status --porcelain) ]]; then
-                    echo "⚠️  Working tree has uncommitted changes. Skipping auto-pull."
-                    echo "Run 'git status' in the worktree to see changes."
-                else
-                    # Check if we can fast-forward
-                    LOCAL=$(git rev-parse @)
-                    REMOTE=$(git rev-parse @{u})
-                    BASE=$(git merge-base @ @{u})
-
-                    if [[ "$LOCAL" == "$REMOTE" ]]; then
-                        echo "Already up to date with remote."
-                    elif [[ "$LOCAL" == "$BASE" ]]; then
-                        echo "Fast-forwarding to latest changes..."
-                        git pull --ff-only
-                    else
-                        echo "⚠️  Branch has diverged from remote (local commits or needs rebase)."
-                        echo "Run 'git pull' manually in the worktree to merge/rebase changes."
-                        git --no-pager log --oneline --decorate --left-right --graph @...@{u} 2>/dev/null | head -10 || true
-                    fi
-                fi
-            fi
-        )
-    else
-        # Check if branch exists on remote
-        if git show-ref --verify --quiet "refs/remotes/origin/${branch_name}"; then
-            echo "Creating worktree from remote branch: origin/${branch_name}"
-            git worktree add --checkout -b "${branch_name}" "${worktree_path}" "origin/${branch_name}"
-        else
-            echo "Creating worktree with new local branch: ${branch_name}"
-            git worktree add --checkout -B "${branch_name}" "${worktree_path}"
-        fi
-    fi
-
-    # Session cleanup and creation
-    require_terminal_backend
-    backend_kill_session "${branch_name}"
-    backend_create_session "${branch_name}" "${worktree_path}"
-
-    # Set worktree environment variables
-    for var_name in $(printenv | grep -oE '^worktree_[^=]+' | grep -v '^worktree_INTERNAL'); do
-        env_key="${var_name#worktree_}"
-        env_value="${!var_name}"
-        backend_set_environment "${branch_name}" "${env_key}" "${env_value}"
-    done
-
-    # Copy all .env files from parent worktree to new worktree
-    copy_env_files "$base_path" "$worktree_path"
-
-    # Copy all .pem files from parent worktree to new worktree
-    copy_pem_files "$base_path" "$worktree_path"
-
-    # Post-setup commands
-    if $run_setup; then
-        if [[ -z "${WORKSPACE_INTERNAL_SETUP_CMD}" ]]; then
-            echo "Error: WORKSPACE_INTERNAL_SETUP_CMD is not set"
-            exit 1
-        fi
-        backend_send_keys "${branch_name}" "${WORKSPACE_INTERNAL_SETUP_CMD}"
-    fi
-
-    backend_attach_session "${branch_name}"
-fi
