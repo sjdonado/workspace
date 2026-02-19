@@ -126,9 +126,16 @@ Managing worktree lifecycle (creation, pruning)
 .SS Common Commands (Both Modes)
 .TP
 .BI "open " [path]
-Open an existing directory in a terminal session (tmux session or Ghostty tab). If no path is provided, uses fzf to interactively select from git projects (repositories and worktrees) found up to 3 levels deep from the current directory. The tool searches for directories containing
-.B .git
-(both directories for regular repos and files for worktrees).
+Open an existing directory in a terminal session (tmux session or Ghostty tab). If no path is provided, the behavior depends on context:
+.RS
+.IP \(bu 2
+.B Inside a git worktree:
+Uses fzf to list all existing worktree branches and remote branches. On selection, creates or switches to the worktree session (equivalent to
+.BR "worktree create" ).
+.IP \(bu 2
+.B Otherwise:
+Uses fzf to interactively select from git projects (repositories and worktrees) found up to 3 levels deep from the current directory.
+.RE
 .IP
 In tmux mode, if a session for the directory already exists, attaches to it (or switches to it if already inside tmux). Otherwise, creates a new session with the configured layout. In Ghostty mode, always opens a new tab (existing tabs cannot be queried).
 .IP

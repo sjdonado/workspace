@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Ghostty terminal support: auto-detected when running outside tmux in Ghostty
 - New tab creation via `open -a Ghostty` on macOS, `ghostty` CLI on Linux
 - Automatic mode detection: tmux mode (inside tmux), Ghostty mode (Ghostty terminal), or unsupported
+- `workspace open` inside a git worktree now lists worktree branches and remote branches via fzf, switching to or creating the selected worktree
 
 ### Changed
 

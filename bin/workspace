@@ -488,6 +488,29 @@ copy_pem_files() {
     done
 }
 
+list_worktree_branches() {
+    local base_path
+    base_path=$(git rev-parse --show-toplevel)
+
+    # List existing worktree branch names
+    git worktree list --porcelain | awk '
+        /^branch / {
+            branch=$2
+            sub(/^refs\/heads\//, "", branch)
+            print branch
+        }
+    '
+
+    # List remote branches not yet checked out as worktrees
+    local existing
+    existing=$(git worktree list --porcelain | awk '/^branch /{sub(/^refs\/heads\//, "", $2); print $2}')
+    git branch -r --format='%(refname:short)' | sed 's|^origin/||' | while read -r branch; do
+        [[ "$branch" == "HEAD" ]] && continue
+        echo "$existing" | grep -Fxq "$branch" && continue
+        echo "$branch"
+    done
+}
+
 kill_stray_processes() {
     local dir="$1"
     local pids
@@ -520,6 +543,14 @@ fi
 case $command in
     open)
         if [[ $# -eq 0 ]]; then
+            # If inside a git repo with worktrees, list branches for fzf
+            if git rev-parse --show-toplevel &>/dev/null && [[ $(git worktree list 2>/dev/null | wc -l) -gt 1 || -f "$(git rev-parse --show-toplevel)/.git" ]]; then
+                selected_branch=$(list_worktree_branches | fzf)
+                [[ -z $selected_branch ]] && exit 0
+                cmd_worktree_create "$selected_branch" "false"
+                exit 0
+            fi
+            # Default: find git projects with fzf
             target_path=$(find "$(pwd)" -maxdepth 3 -name ".git" \( -type d -o -type f \) -exec dirname {} \; 2>/dev/null | sort -u | fzf)
             [[ -z $target_path ]] && exit 0
         else
