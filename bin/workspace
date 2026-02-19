@@ -559,8 +559,8 @@ fi
 case $command in
     open)
         if [[ $# -eq 0 ]]; then
-            # If inside a git worktree, list branches for fzf
-            if git rev-parse --show-toplevel &>/dev/null && [[ $(git worktree list 2>/dev/null | wc -l) -gt 1 ]] && [[ -f "$(git rev-parse --show-toplevel)/.git" || "$(git rev-parse --absolute-git-dir 2>/dev/null)" == *"/worktrees/"* ]]; then
+            # If inside a git repo with multiple worktrees, list branches for fzf
+            if git rev-parse --show-toplevel &>/dev/null && [[ $(git worktree list 2>/dev/null | wc -l) -gt 1 ]]; then
                 selected_branch=$(list_worktree_branches | fzf)
                 [[ -z $selected_branch ]] && exit 0
                 cmd_worktree_create "$selected_branch" "false"
