@@ -1,6 +1,6 @@
 .TH workspace 1 "February 2025" "workspace 1.0" "User Commands"
 .SH NAME
-workspace \- manage tmux sessions and git worktrees
+workspace \- manage terminal sessions and git worktrees
 .SH SYNOPSIS
 .B workspace
 .B open
@@ -37,25 +37,66 @@ workspace \- manage tmux sessions and git worktrees
 .B \-\-version
 .SH DESCRIPTION
 .B workspace
-is a unified tool for managing tmux sessions with two modes:
+is a unified tool for managing terminal sessions and git worktrees. It auto-detects the terminal environment and operates in one of three modes:
+.B tmux mode
+(inside a tmux session),
+.B ghostty mode
+(running in Ghostty terminal without tmux), or
+.B unsupported
+(neither detected).
+.PP
+The tool provides two operational modes:
 .B sessionizer mode
 for quick directory-based sessions, and
 .B worktree mode
 for full git worktree management.
 .PP
-In sessionizer mode (default), the tool helps you quickly open existing directories in tmux sessions. It uses fzf to find git projects (both regular repositories and worktrees) in your current directory tree.
+In sessionizer mode (default), the tool helps you quickly open existing directories in terminal sessions. It uses fzf to find git projects (both regular repositories and worktrees) in your current directory tree.
 .PP
 In worktree mode (via the
 .B worktree
-subcommand), the tool provides full git worktree capabilities: creating new worktrees for branches, managing their lifecycle, and automatically setting up tmux sessions with custom layouts. When creating a worktree, the tool creates a git worktree in a sibling directory, sets up a tmux session with a configurable layout, copies environment and certificate files from the parent worktree, and optionally runs setup commands.
+subcommand), the tool provides full git worktree capabilities: creating new worktrees for branches, managing their lifecycle, and automatically setting up terminal sessions. When creating a worktree, the tool creates a git worktree in a sibling directory, sets up a session with a configurable layout (tmux only), copies environment and certificate files from the parent worktree, and optionally runs setup commands.
+.SH TERMINAL DETECTION
+The tool automatically detects the terminal environment at startup:
+.TP
+.B tmux mode
+Active when the
+.B TMUX
+environment variable is set (running inside a tmux session). Provides full functionality including pane layouts, environment variable forwarding, and send-keys support.
+.TP
+.B ghostty mode
+Active when
+.B TERM_PROGRAM
+is set to "ghostty" and not inside tmux. Uses Ghostty tabs instead of tmux sessions. On macOS, new tabs are opened via
+.BR "open -a Ghostty" ;
+on Linux, via the
+.B ghostty
+CLI. This mode has reduced functionality:
+.RS
+.IP \(bu 2
+No pane layout support (WORKSPACE_INTERNAL_LAYOUT is ignored)
+.IP \(bu 2
+No environment variable forwarding (worktree_* variables are not set in tabs)
+.IP \(bu 2
+No programmatic tab queries (prune cannot detect active tabs)
+.IP \(bu 2
+No send-keys support (\-\-setup prints the command instead of executing it)
+.IP \(bu 2
+Tabs cannot be closed programmatically (user must close manually)
+.RE
+.TP
+.B unsupported
+When neither tmux nor Ghostty is detected, terminal-dependent commands (open, close) will fail with an error. Git-only commands (worktree remove, worktree prune) still work.
+.PP
+If tmux is running inside Ghostty, tmux mode takes priority.
 .SH MODES
 .TP
 .B Sessionizer Mode (Default)
 Without the
 .B worktree
-subcommand, the tool operates as a tmux session manager. The
+subcommand, the tool operates as a terminal session manager. The
 .B open
-command finds existing git projects using fzf and creates tmux sessions for them. This mode is ideal for:
+command finds existing git projects using fzf and creates sessions for them. This mode is ideal for:
 .RS
 .IP \(bu 2
 Quick navigation between projects
@@ -85,25 +126,25 @@ Managing worktree lifecycle (creation, pruning)
 .SS Common Commands (Both Modes)
 .TP
 .BI "open " [path]
-Open an existing directory in a tmux session. If no path is provided, uses fzf to interactively select from git projects (repositories and worktrees) found up to 3 levels deep from the current directory. The tool searches for directories containing
+Open an existing directory in a terminal session (tmux session or Ghostty tab). If no path is provided, uses fzf to interactively select from git projects (repositories and worktrees) found up to 3 levels deep from the current directory. The tool searches for directories containing
 .B .git
 (both directories for regular repos and files for worktrees).
 .IP
-If a tmux session for the directory already exists, attaches to it (or switches to it if already inside tmux). Otherwise, creates a new session with the configured layout.
+In tmux mode, if a session for the directory already exists, attaches to it (or switches to it if already inside tmux). Otherwise, creates a new session with the configured layout. In Ghostty mode, always opens a new tab (existing tabs cannot be queried).
 .IP
 Session names are derived from the directory path. If the target is within the current directory, the relative path is used; otherwise, the basename is used. Dots and slashes are replaced with underscores for tmux compatibility.
 .TP
 .BI "close " [session_name]
-Kill the specified tmux session. If
+Close the specified session. In tmux mode, kills the tmux session. In Ghostty mode, prints a message to close the tab manually. If
 .I session_name
-is omitted and running inside tmux, uses the current session name. Otherwise, an error is returned.
+is omitted, auto-detects from the current environment. An error is returned if no terminal backend is detected.
 .TP
 .BI "remove " [branch_name]
-Kill the tmux session and remove the git worktree for the specified branch. If
+Close the session and remove the git worktree for the specified branch. If
 .I branch_name
 is omitted, uses the current branch. Protected branches (main, master, _main, _master) cannot be removed. Any processes holding files in the worktree directory are automatically terminated.
 .IP
-This is a convenience shorthand for killing the session and removing the worktree in one step, without requiring the
+This is a convenience shorthand for closing the session and removing the worktree in one step, without requiring the
 .B worktree
 subcommand.
 .TP
@@ -119,18 +160,18 @@ Print the version number and exit. Also accepts
 .SS Worktree Subcommands (workspace worktree <subcommand>)
 .TP
 .BI "create " "[--setup] branch_name"
-Create a new git worktree for the specified branch and open a tmux session. The worktree is created as a sibling directory to the main repository. The tool automatically:
+Create a new git worktree for the specified branch and open a terminal session (tmux session or Ghostty tab). The worktree is created as a sibling directory to the main repository. The tool automatically:
 .RS
 .IP \(bu 2
 Fetches latest changes from remote
 .IP \(bu 2
 Creates a worktree from a remote branch if it exists on origin, or creates a new local branch
 .IP \(bu 2
-Sets up a tmux session with the configured layout
+Sets up a terminal session with the configured layout (tmux only)
 .IP \(bu 2
 Copies .env and .pem files from the parent repository
 .IP \(bu 2
-Propagates worktree_* environment variables to the tmux session
+Propagates worktree_* environment variables to the session (tmux only)
 .RE
 .IP
 If the worktree already exists, it is reused. The tool performs a smart pull with safety checks:
@@ -145,13 +186,13 @@ Fast-forwards if possible
 Warns if the branch has diverged from remote
 .RE
 .IP
-Any existing tmux session for the branch is killed and recreated with the current layout configuration.
+Any existing session for the branch is closed and recreated with the current layout configuration (tmux) or a new tab is opened (Ghostty).
 .IP
 Use the
 .B \-\-setup
 flag to run the command specified in
 .B WORKSPACE_INTERNAL_SETUP_CMD
-after creating the worktree. The command is sent to the first pane of the tmux session.
+after creating the worktree. In tmux mode, the command is sent to the first pane. In Ghostty mode, the command is printed for manual execution.
 .TP
 .BI "remove " [branch_name]
 Remove the git worktree for the specified branch. If
@@ -159,14 +200,14 @@ Remove the git worktree for the specified branch. If
 is omitted, uses the current branch. Protected branches (main, master, _main, _master) cannot be removed. Any processes holding files in the worktree directory are automatically terminated.
 .TP
 .BI "prune " [--force]
-Remove all worktrees that have no active tmux session. By default, worktrees with uncommitted changes are skipped. This command preserves:
+Remove all worktrees that have no active session. In Ghostty mode, active tabs cannot be detected, so the tool relies on the clean-working-tree check as a safety net. By default, worktrees with uncommitted changes are skipped. This command preserves:
 .RS
 .IP \(bu 2
 The main worktree
 .IP \(bu 2
 Protected branches (main, master, _main, _master)
 .IP \(bu 2
-Worktrees with active tmux sessions
+Worktrees with active sessions (tmux only)
 .IP \(bu 2
 Worktrees with uncommitted changes (unless
 .B \-\-force
@@ -222,7 +263,7 @@ Each comma-separated segment creates a new tmux window. The first pane of the fi
 .B WORKSPACE_INTERNAL_SETUP_CMD
 Command to run after creating a new worktree when
 .B \-\-setup
-is specified. The command is sent as keystrokes to the first pane of the tmux session. Typically used for installing dependencies or running build commands.
+is specified. In tmux mode, the command is sent as keystrokes to the first pane. In Ghostty mode, the command is printed for manual execution. Typically used for installing dependencies or running build commands.
 .IP
 .B Example:
 export WORKSPACE_INTERNAL_SETUP_CMD="pnpm i && pnpm build"
@@ -232,11 +273,17 @@ Any environment variable prefixed with
 .B worktree_
 (except those starting with
 .BR worktree_INTERNAL )
-will be set in the tmux session environment with the prefix removed. For example,
+will be set in the session environment with the prefix removed (tmux only). For example,
 .B worktree_API_KEY
 becomes
 .B API_KEY
-in the tmux session.
+in the tmux session. In Ghostty mode, these variables are not forwarded.
+.TP
+.B TMUX
+Set automatically by tmux. When present, the tool operates in tmux mode.
+.TP
+.B TERM_PROGRAM
+Used to detect Ghostty terminal. When set to "ghostty" and TMUX is not set, the tool operates in Ghostty mode.
 .SH FILES
 .TP
 .I .env
@@ -363,8 +410,12 @@ file pointing to parent repository).
 .TP
 .B Required:
 .BR bash (1),
-.BR tmux (1),
 .BR git (1)
+.TP
+.B Terminal (one required):
+.BR tmux (1)
+(full functionality) or
+Ghostty terminal (reduced functionality, see TERMINAL DETECTION)
 .TP
 .B Optional:
 .BR fzf (1)

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2025-02-19
+
+### Added
+
+- Ghostty terminal support: auto-detected when running outside tmux in Ghostty
+- New tab creation via `open -a Ghostty` on macOS, `ghostty` CLI on Linux
+- Automatic mode detection: tmux mode (inside tmux), Ghostty mode (Ghostty terminal), or unsupported
+
+### Changed
+
+- `open`, `close`, `remove`, `worktree create`, and `worktree prune` commands now adapt to the detected terminal mode
+- tmux is no longer a hard requirement when using Ghostty
+
 ## [1.0.0] - 2025-02-11
 
 ### Added

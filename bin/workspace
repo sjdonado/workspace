@@ -6,23 +6,34 @@ usage() {
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  open [path]             Open existing directory (uses fzf to find git projects if no path given)"
-    echo "  close [name]            Kill tmux session (auto-detects if omitted)"
-    echo "  remove [branch_name]    Kill tmux session and remove git worktree (auto-detects if omitted)"
+    echo "  open [path]             Open directory in new session/tab (uses fzf if no path given)"
+    echo "  close [name]            Close session/tab (auto-detects if omitted)"
+    echo "  remove [branch_name]    Close session and remove git worktree (auto-detects if omitted)"
     echo "  worktree <subcommand>   Git worktree operations (alias: --worktree)"
     echo "  help                    Show this help"
     echo ""
     echo "Worktree Subcommands:"
     echo "  worktree create [--setup] <branch_name>"
-    echo "                          Create new git worktree and open tmux session"
+    echo "                          Create new git worktree and open session/tab"
     echo "                          --setup: Run \$WORKSPACE_INTERNAL_SETUP_CMD after create"
     echo "  worktree remove [branch_name]"
     echo "                          Remove git worktree (auto-detects if omitted)"
     echo "  worktree prune [--force]"
     echo "                          Remove all unused worktrees"
     echo "                          --force: Also remove worktrees with uncommitted changes"
+    echo ""
+    echo "Detected mode: $WORKSPACE_MODE (tmux|ghostty|none)"
     exit 0
 }
+
+# Terminal mode detection (tmux > ghostty > none)
+if [[ -n "$TMUX" ]]; then
+    WORKSPACE_MODE="tmux"
+elif [[ "$TERM_PROGRAM" == "ghostty" ]]; then
+    WORKSPACE_MODE="ghostty"
+else
+    WORKSPACE_MODE="none"
+fi
 
 worktree_mode=false
 add_worktree=false
@@ -158,6 +169,101 @@ copy_pem_files() {
     done
 }
 
+ghostty_open_tab() {
+    local dir="$1"
+    case "$(uname -s)" in
+        Darwin)
+            open -a Ghostty "$dir"
+            ;;
+        Linux)
+            ghostty --working-directory="$dir" &
+            disown
+            ;;
+        *)
+            echo "Error: Ghostty tab creation not supported on this OS"
+            return 1
+            ;;
+    esac
+}
+
+require_terminal_backend() {
+    if [[ "$WORKSPACE_MODE" == "none" ]]; then
+        echo "Error: No supported terminal detected."
+        echo "Run inside tmux or use Ghostty terminal."
+        exit 1
+    fi
+}
+
+backend_session_exists() {
+    local name="$1"
+    case "$WORKSPACE_MODE" in
+        tmux) tmux has-session -t="$name" 2>/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+backend_create_session() {
+    local name="$1"
+    local work_dir="$2"
+    case "$WORKSPACE_MODE" in
+        tmux) create_tmux_layout "$name" "$work_dir" ;;
+        ghostty) ghostty_open_tab "$work_dir" ;;
+    esac
+}
+
+backend_attach_session() {
+    local name="$1"
+    case "$WORKSPACE_MODE" in
+        tmux)
+            if [[ -n "$TMUX" ]]; then
+                tmux switch-client -t "$name"
+            else
+                tmux attach -t "$name"
+            fi
+            ;;
+        ghostty)
+            # Tab is already focused after creation
+            ;;
+    esac
+}
+
+backend_kill_session() {
+    local name="$1"
+    case "$WORKSPACE_MODE" in
+        tmux)
+            if tmux has-session -t "$name" 2>/dev/null; then
+                echo "Killing tmux session: $name"
+                tmux kill-session -t "$name"
+            fi
+            ;;
+        ghostty)
+            echo "Note: Close the '$name' Ghostty tab manually."
+            ;;
+    esac
+}
+
+backend_current_session_name() {
+    case "$WORKSPACE_MODE" in
+        tmux) tmux display-message -p '#S' ;;
+        ghostty) basename "$(pwd)" ;;
+    esac
+}
+
+backend_set_environment() {
+    local session="$1" key="$2" value="$3"
+    case "$WORKSPACE_MODE" in
+        tmux) tmux set-environment -t "$session" "$key" "$value" ;;
+    esac
+}
+
+backend_send_keys() {
+    local session="$1" command="$2"
+    case "$WORKSPACE_MODE" in
+        tmux) tmux send-keys -t "$session" "$command" C-m ;;
+        ghostty) echo "Note: Run manually in the Ghostty tab: $command" ;;
+    esac
+}
+
 # Parse command (first argument)
 if [[ $# -eq 0 ]]; then
     usage
@@ -248,13 +354,11 @@ case $command in
         if [[ $# -gt 0 && $1 != --* ]]; then
             target_path=$1
         else
-            # Auto-detect: use current tmux session name
-            if [[ -n $TMUX ]]; then
-                target_path=$(tmux display-message -p '#S')
-            else
-                echo "Error: Not in a tmux session and no session name provided"
+            if [[ "$WORKSPACE_MODE" == "none" ]]; then
+                echo "Error: Not in a tmux session or Ghostty terminal, and no session name provided"
                 exit 1
             fi
+            target_path=$(backend_current_session_name)
         fi
         ;;
     prune)
@@ -292,44 +396,33 @@ case $command in
         ;;
 esac
 
-# Open command: create/attach tmux session for directory
+# Open command: create/attach session for directory
 if [[ -n $target_path ]]; then
+    require_terminal_backend
+
     # Try to get relative path from current directory
     current_dir="$(pwd)"
     if [[ "$target_path" == "$current_dir/"* ]]; then
-        # Target is within current directory - use relative path
         selected_name="${target_path#$current_dir/}"
     else
-        # Target is outside current directory - use basename
         selected_name=$(basename "$target_path")
     fi
 
-    # Replace slashes and dots with underscores for tmux session name
+    # Replace slashes and dots with underscores for session name
     selected_name=$(echo "$selected_name" | tr './' '__')
 
-    # Create session if it doesn't exist
-    if ! tmux has-session -t="$selected_name" 2> /dev/null; then
-        create_tmux_layout "$selected_name" "$target_path"
+    if ! backend_session_exists "$selected_name"; then
+        backend_create_session "$selected_name" "$target_path"
     fi
 
-    # Attach or switch to session
-    if [[ -z $TMUX ]]; then
-        tmux attach -t "$selected_name"
-    else
-        tmux switch-client -t "$selected_name"
-    fi
+    backend_attach_session "$selected_name"
     exit 0
 fi
 
 # Handle close for both modes
 if $close_session; then
     session_name="${target_path:-$branch_name}"
-    if tmux has-session -t "$session_name" 2>/dev/null; then
-        # Just kill the session - tmux handles detaching automatically if we're inside it
-        tmux kill-session -t "$session_name"
-    else
-        echo "No tmux session found: $session_name"
-    fi
+    backend_kill_session "$session_name"
     exit 0
 fi
 
@@ -344,11 +437,7 @@ if $remove_single; then
         }
     done
 
-    # Kill tmux session if it exists
-    if tmux has-session -t "$branch_name" 2>/dev/null; then
-        echo "Killing tmux session: $branch_name"
-        tmux kill-session -t "$branch_name"
-    fi
+    backend_kill_session "$branch_name"
 
     # Remove git worktree
     workdir="$base_path/../${branch_name}"
@@ -403,9 +492,9 @@ if $prune_worktrees; then
         done
         [[ "$is_protected" == "true" ]] && continue
 
-        # Check if tmux session exists
-        if tmux has-session -t "$branch_name" 2>/dev/null; then
-            echo "⏭  Skipping $branch_name (tmux session active)"
+        # Check if session exists (tmux only — Ghostty tabs cannot be queried)
+        if backend_session_exists "$branch_name"; then
+            echo "⏭  Skipping $branch_name (session active)"
             continue
         fi
 
@@ -526,20 +615,16 @@ if $add_worktree; then
         fi
     fi
 
-    # Tmux session cleanup
-    if tmux has-session -t "${branch_name}" 2>/dev/null; then
-        echo "Killing existing tmux session: ${branch_name}"
-        tmux kill-session -t "${branch_name}"
-    fi
-
-    # Create tmux session with configured layout
-    create_tmux_layout "${branch_name}" "${worktree_path}"
+    # Session cleanup and creation
+    require_terminal_backend
+    backend_kill_session "${branch_name}"
+    backend_create_session "${branch_name}" "${worktree_path}"
 
     # Set worktree environment variables
     for var_name in $(printenv | grep -oE '^worktree_[^=]+' | grep -v '^worktree_INTERNAL'); do
         env_key="${var_name#worktree_}"
         env_value="${!var_name}"
-        tmux set-environment -t "${branch_name}" "${env_key}" "${env_value}"
+        backend_set_environment "${branch_name}" "${env_key}" "${env_value}"
     done
 
     # Copy all .env files from parent worktree to new worktree
@@ -554,12 +639,8 @@ if $add_worktree; then
             echo "Error: WORKSPACE_INTERNAL_SETUP_CMD is not set"
             exit 1
         fi
-        tmux send-keys -t "${branch_name}" "${WORKSPACE_INTERNAL_SETUP_CMD}" C-m
+        backend_send_keys "${branch_name}" "${WORKSPACE_INTERNAL_SETUP_CMD}"
     fi
 
-    if [[ -n "$TMUX" ]]; then
-      tmux switch-client -t "${branch_name}"
-    else
-      tmux attach-session -t "${branch_name}"
-    fi
+    backend_attach_session "${branch_name}"
 fi
