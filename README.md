@@ -124,7 +124,7 @@ Workspace auto-detects the terminal backend:
 | **tmux** | Inside a tmux session (`$TMUX` set) | Sessions, layouts, panes, env forwarding |
 | **Kitty** | Kitty terminal (`$KITTY_WINDOW_ID`) | Tabs via `kitten @` remote control, env forwarding, send-text, tab queries/close (requires `allow_remote_control`) |
 | **Ghostty** | Ghostty terminal (`$TERM_PROGRAM`) | Opens new tabs via `open -a Ghostty` (macOS) or `ghostty` CLI (Linux) |
-| **Alacritty** | Alacritty terminal (`$TERM_PROGRAM` or `$ALACRITTY_SOCKET`) | Opens new windows via `alacritty msg create-window` (IPC) or `alacritty` CLI (fallback) |
+| **Alacritty** | Alacritty terminal (`$ALACRITTY_WINDOW_ID`) | Opens new windows via `alacritty msg create-window` (IPC) or app bundle binary (macOS DMG fallback) |
 
 ## Commands
 

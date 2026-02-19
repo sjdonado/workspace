@@ -119,15 +119,17 @@ Tabs cannot be closed programmatically (user must close manually)
 .RE
 .TP
 .B alacritty mode
-Active when
-.B TERM_PROGRAM
-is set to "alacritty" or the
-.B ALACRITTY_SOCKET
-environment variable is present, and not inside tmux. Uses Alacritty windows instead of tmux sessions. When an existing IPC socket is available (via
+Active when the
+.B ALACRITTY_WINDOW_ID
+environment variable is present, and not inside tmux. Uses Alacritty windows instead of tmux sessions. When the
+.B alacritty
+CLI is on PATH and an IPC socket is available (via
 .BR ALACRITTY_SOCKET ),
 new windows are created in the same Alacritty process using
-.BR "alacritty msg create-window" ;
-otherwise, a new Alacritty process is launched. This mode has the same reduced functionality as Ghostty mode:
+.BR "alacritty msg create-window" .
+On macOS, if the CLI is not on PATH (typical for DMG installs), the binary is resolved from the app bundle at
+.BR /Applications/Alacritty.app/Contents/MacOS/alacritty .
+This mode has the same reduced functionality as Ghostty mode:
 .RS
 .IP \(bu 2
 No pane layout support (WORKSPACE_INTERNAL_LAYOUT is ignored)
@@ -368,12 +370,17 @@ or
 in kitty.conf) for full functionality.
 .TP
 .B TERM_PROGRAM
-Used to detect Ghostty and Alacritty terminals. When set to "ghostty" and TMUX is not set, the tool operates in Ghostty mode. When set to "alacritty" and TMUX is not set, the tool operates in Alacritty mode.
+Used to detect Ghostty terminal. When set to "ghostty" and TMUX is not set, the tool operates in Ghostty mode.
+.TP
+.B ALACRITTY_WINDOW_ID
+Set automatically by Alacritty in all child processes. When present and TMUX is not set, the tool operates in Alacritty mode.
 .TP
 .B ALACRITTY_SOCKET
-Set automatically by Alacritty to the path of its IPC Unix socket. Used as a fallback for Alacritty detection when TERM_PROGRAM is not set. When present, enables efficient window creation via
+Set automatically by Alacritty to the path of its IPC Unix socket. When present, enables efficient window creation via
 .B alacritty msg create-window
-(windows share the same Alacritty process).
+(windows share the same Alacritty process). If the
+.B alacritty
+CLI is not on PATH (e.g. macOS DMG install), the binary is resolved from the app bundle.
 .SH FILES
 .TP
 .I .env

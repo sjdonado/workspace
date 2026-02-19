@@ -9,7 +9,7 @@ elif [[ -n "$KITTY_WINDOW_ID" ]]; then
     WORKSPACE_MODE="kitty"
 elif [[ "$TERM_PROGRAM" == "ghostty" ]]; then
     WORKSPACE_MODE="ghostty"
-elif [[ "$TERM_PROGRAM" == "alacritty" ]] || [[ -n "$ALACRITTY_SOCKET" ]]; then
+elif [[ -n "$ALACRITTY_WINDOW_ID" ]]; then
     WORKSPACE_MODE="alacritty"
 else
     WORKSPACE_MODE="none"
@@ -501,10 +501,20 @@ kitty_open_tab() {
 
 alacritty_open_window() {
     local dir="$1"
-    if [[ -n "$ALACRITTY_SOCKET" ]]; then
-        alacritty msg create-window --working-directory "$dir"
+    local alacritty_bin
+    if command -v alacritty &>/dev/null; then
+        alacritty_bin="alacritty"
+    elif [[ "$(uname -s)" == "Darwin" && -x "/Applications/Alacritty.app/Contents/MacOS/alacritty" ]]; then
+        alacritty_bin="/Applications/Alacritty.app/Contents/MacOS/alacritty"
     else
-        alacritty --working-directory "$dir" &
+        echo "Error: alacritty command not found in PATH"
+        return 1
+    fi
+
+    if [[ -n "$ALACRITTY_SOCKET" ]]; then
+        "$alacritty_bin" msg create-window --working-directory "$dir"
+    else
+        "$alacritty_bin" --working-directory "$dir" &
         disown
     fi
 }
